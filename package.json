@@ -1,7 +1,8 @@
 {
   "name": "skillhub-vscode",
   "displayName": "SkillHub",
-  "description": "SkillHub VS Code Extension",
+  "description": "管理和同步你的本地 AI 技能 (Skills) 与提示词 (Prompts)",
+  "publisher": "becool",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.93.0"
@@ -12,12 +13,165 @@
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "skillhub-explorer",
+          "title": "SkillHub",
+          "icon": "assets/skillhub-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "skillhub-explorer": [
+        {
+          "id": "skillhub-skills-view",
+          "name": "技能库",
+          "icon": "assets/skillhub-icon.svg"
+        },
+        {
+          "id": "skillhub-prompts-view",
+          "name": "提示词",
+          "icon": "assets/skillhub-icon.svg"
+        }
+      ]
+    },
     "commands": [
       {
-        "command": "skillhub.helloWorld",
-        "title": "Hello World"
+        "command": "skillhub.refresh",
+        "title": "Refresh Skills",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "skillhub.searchSkills",
+        "title": "搜索",
+        "icon": "$(search)"
+      },
+      {
+        "command": "skillhub.searchPrompts",
+        "title": "搜索",
+        "icon": "$(search)"
+      },
+      {
+        "command": "skillhub.openSkill",
+        "title": "Open Skill"
+      },
+      {
+        "command": "skillhub.openSkillInNewTab",
+        "title": "在新选项卡中打开详情"
+      },
+      {
+        "command": "skillhub.installSkill",
+        "title": "安装到当前工作区"
+      },
+      {
+        "command": "skillhub.uninstallSkill",
+        "title": "断开当前工作区连接"
+      },
+      {
+        "command": "skillhub.openInVSCode",
+        "title": "打开 SKILL.md"
+      },
+      {
+        "command": "skillhub.revealInFinder",
+        "title": "在文件夹中显示"
+      },
+      {
+        "command": "skillhub.openInTerminal",
+        "title": "在终端中打开"
+      },
+      {
+        "command": "skillhub.copyPath",
+        "title": "复制技能目录路径"
+      },
+      {
+        "command": "skillhub.copyUrl",
+        "title": "复制技能URL"
+      },
+      {
+        "command": "skillhub.openPrompt",
+        "title": "Open Prompt"
+      },
+      {
+        "command": "skillhub.openPromptInNewTab",
+        "title": "在新选项卡中打开详情"
+      },
+      {
+        "command": "skillhub.copyPrompt",
+        "title": "复制提示词内容"
       }
-    ]
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "skillhub.searchSkills",
+          "when": "view == skillhub-skills-view",
+          "group": "navigation@1"
+        },
+        {
+          "command": "skillhub.searchPrompts",
+          "when": "view == skillhub-prompts-view",
+          "group": "navigation@1"
+        },
+        {
+          "command": "skillhub.refresh",
+          "when": "view == skillhub-skills-view || view == skillhub-prompts-view",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "skillhub.openSkillInNewTab",
+          "when": "view == skillhub-skills-view && viewItem =~ /skill-installed|skill-uninstalled|skill-online|skill-missing/",
+          "group": "0_view@1"
+        },
+        {
+          "command": "skillhub.installSkill",
+          "when": "view == skillhub-skills-view && viewItem =~ /skill-uninstalled|collection-uninstalled/",
+          "group": "1_actions@1"
+        },
+        {
+          "command": "skillhub.uninstallSkill",
+          "when": "view == skillhub-skills-view && viewItem =~ /skill-installed|collection-installed/",
+          "group": "1_actions@2"
+        },
+        {
+          "command": "skillhub.openInVSCode",
+          "when": "view == skillhub-skills-view && viewItem =~ /skill-installed|skill-uninstalled/",
+          "group": "2_open@1"
+        },
+        {
+          "command": "skillhub.revealInFinder",
+          "when": "view == skillhub-skills-view && viewItem =~ /skill-installed|skill-uninstalled|collection-installed|collection-uninstalled/",
+          "group": "3_utils@1"
+        },
+        {
+          "command": "skillhub.openInTerminal",
+          "when": "view == skillhub-skills-view && viewItem =~ /skill-installed|skill-uninstalled|collection-installed|collection-uninstalled/",
+          "group": "2_open@3"
+        },
+        {
+          "command": "skillhub.copyPath",
+          "when": "view == skillhub-skills-view && viewItem =~ /skill-installed|skill-uninstalled|skill-missing|collection-installed|collection-uninstalled|collection-missing/",
+          "group": "3_utils@2"
+        },
+        {
+          "command": "skillhub.copyUrl",
+          "when": "view == skillhub-skills-view && viewItem =~ /skill-online|collection-online/",
+          "group": "3_utils@2"
+        },
+        {
+          "command": "skillhub.openPromptInNewTab",
+          "when": "view == skillhub-prompts-view && viewItem == prompt",
+          "group": "0_view@1"
+        },
+        {
+          "command": "skillhub.copyPrompt",
+          "when": "view == skillhub-prompts-view && viewItem == prompt",
+          "group": "1_actions@1"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -28,14 +182,22 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.93.0",
+    "@types/highlight.js": "^9.12.4",
+    "@types/markdown-it": "^14.2.0",
     "@types/mocha": "^10.0.7",
     "@types/node": "20.x",
+    "@types/sql.js": "^1.4.11",
+    "@types/vscode": "^1.93.0",
     "@typescript-eslint/eslint-plugin": "^8.3.0",
     "@typescript-eslint/parser": "^8.3.0",
-    "eslint": "^9.9.1",
-    "typescript": "^5.5.4",
     "@vscode/test-cli": "^0.0.10",
-    "@vscode/test-electron": "^2.4.1"
+    "@vscode/test-electron": "^2.4.1",
+    "eslint": "^9.9.1",
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "highlight.js": "^11.12.0",
+    "markdown-it": "^15.0.1",
+    "sql.js": "^1.14.2"
   }
 }
