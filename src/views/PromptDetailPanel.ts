@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { Prompt } from '../types';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
+import { translateText } from '../utils/translate';
 
 export class PromptDetailPanel {
   public static currentPanel: PromptDetailPanel | undefined;
@@ -17,7 +18,31 @@ export class PromptDetailPanel {
         switch (message.command) {
           case 'copyPrompt':
             vscode.env.clipboard.writeText(this.prompt.content);
-            vscode.window.showInformationMessage('提示词已复制到剪贴板！');
+            vscode.window.setStatusBarMessage('已复制提示词内容', 3000);
+            return;
+          case 'translate':
+            vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "正在翻译..." }, async () => {
+              try {
+                const translated = await translateText(message.text, message.targetLang || 'zh-CN');
+                const md = new MarkdownIt({
+                  html: true,
+                  linkify: true,
+                  typographer: true,
+                  highlight: function (str, lang) {
+                    if (lang && hljs.getLanguage(lang)) {
+                      try {
+                        return hljs.highlight(str, { language: lang }).value;
+                      } catch (__) {}
+                    }
+                    return '';
+                  }
+                });
+                
+                this._panel.webview.postMessage({ command: 'translatedContent', html: md.render(translated), targetLang: message.targetLang });
+              } catch (err: any) {
+                vscode.window.showErrorMessage('翻译失败: ' + err.message);
+              }
+            });
             return;
         }
       },
@@ -237,6 +262,43 @@ export class PromptDetailPanel {
         .btn-copy:hover {
             background-color: var(--vscode-button-hoverBackground);
         }
+        .btn-secondary {
+            background-color: var(--vscode-button-secondaryBackground);
+            color: var(--vscode-button-secondaryForeground);
+        }
+        .btn-secondary:hover {
+            background-color: var(--vscode-button-secondaryHoverBackground);
+        }
+        .translation-toolbar {
+            display: flex;
+            align-items: center;
+            background: var(--vscode-editor-inactiveSelectionBackground);
+            padding: 8px 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            border: 1px solid var(--vscode-editorWidget-border);
+        }
+        .translation-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .toolbar-label {
+            font-size: 13px;
+            color: var(--vscode-descriptionForeground);
+        }
+        .lang-select {
+            background: var(--vscode-dropdown-background);
+            color: var(--vscode-dropdown-foreground);
+            border: 1px solid var(--vscode-dropdown-border);
+            padding: 4px;
+            border-radius: 4px;
+            font-family: inherit;
+        }
+        .btn-small {
+            padding: 4px 12px;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
@@ -257,16 +319,99 @@ export class PromptDetailPanel {
         </div>
     </div>
     
+    <div class="translation-toolbar">
+        <div class="translation-controls">
+            <span class="toolbar-label">Language:</span>
+            <select id="targetLangSelect" class="lang-select">
+                <option value="zh-CN" selected>中文</option>
+                <option value="en">English</option>
+                <option value="ja">日本語</option>
+                <option value="ko">한국어</option>
+                <option value="fr">Français</option>
+                <option value="es">Español</option>
+                <option value="ru">Русский</option>
+            </select>
+            <button id="translateBtn" class="btn-copy btn-secondary btn-small">翻译内容</button>
+            <button id="restoreBtn" class="btn-copy btn-secondary btn-small" style="display: none;">恢复原文</button>
+        </div>
+    </div>
+    
     <div class="markdown-body">
         ${renderedMarkdown}
     </div>
 
     <script>
         const vscode = acquireVsCodeApi();
+        const rawContent = ${JSON.stringify(content)};
+        const originalHtml = ${JSON.stringify(renderedMarkdown)};
+        let translations = {};
+        let currentMode = 'original';
+        
         document.getElementById('copyBtn').addEventListener('click', () => {
             vscode.postMessage({
                 command: 'copyPrompt'
             });
+        });
+
+        document.getElementById('translateBtn').addEventListener('click', () => {
+            const lang = document.getElementById('targetLangSelect').value;
+            if (translations[lang]) {
+                document.querySelector('.markdown-body').innerHTML = translations[lang];
+                document.getElementById('translateBtn').style.display = 'none';
+                document.getElementById('restoreBtn').style.display = 'inline-flex';
+                currentMode = 'translated';
+                return;
+            }
+            
+            document.getElementById('translateBtn').innerText = '翻译中...';
+            document.getElementById('translateBtn').disabled = true;
+            
+            vscode.postMessage({
+                command: 'translate',
+                text: rawContent,
+                targetLang: lang
+            });
+        });
+        
+        document.getElementById('restoreBtn').addEventListener('click', () => {
+            document.querySelector('.markdown-body').innerHTML = originalHtml;
+            document.getElementById('restoreBtn').style.display = 'none';
+            const tBtn = document.getElementById('translateBtn');
+            tBtn.style.display = 'inline-flex';
+            tBtn.innerText = '翻译内容';
+            tBtn.disabled = false;
+            currentMode = 'original';
+        });
+
+        document.getElementById('targetLangSelect').addEventListener('change', () => {
+            if (currentMode === 'translated') {
+                const lang = document.getElementById('targetLangSelect').value;
+                if (translations[lang]) {
+                    document.querySelector('.markdown-body').innerHTML = translations[lang];
+                } else {
+                    document.querySelector('.markdown-body').innerHTML = originalHtml;
+                    document.getElementById('restoreBtn').style.display = 'none';
+                    const tBtn = document.getElementById('translateBtn');
+                    tBtn.style.display = 'inline-flex';
+                    tBtn.innerText = '翻译内容';
+                    tBtn.disabled = false;
+                    currentMode = 'original';
+                }
+            }
+        });
+
+        window.addEventListener('message', event => {
+            const message = event.data;
+            if (message.command === 'translatedContent') {
+                translations[message.targetLang] = message.html;
+                const mdBody = document.querySelector('.markdown-body');
+                if (mdBody) {
+                    mdBody.innerHTML = message.html;
+                }
+                document.getElementById('translateBtn').style.display = 'none';
+                document.getElementById('restoreBtn').style.display = 'inline-flex';
+                currentMode = 'translated';
+            }
         });
     </script>
 </body>
