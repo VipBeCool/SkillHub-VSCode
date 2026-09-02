@@ -321,7 +321,7 @@ export class PromptDetailPanel {
     
     <div class="translation-toolbar">
         <div class="translation-controls">
-            <span class="toolbar-label">Language:</span>
+            <span class="toolbar-label" style="font-size: 14px;" title="目标语言">🌐</span>
             <select id="targetLangSelect" class="lang-select">
                 <option value="zh-CN" selected>中文</option>
                 <option value="en">English</option>
@@ -331,8 +331,8 @@ export class PromptDetailPanel {
                 <option value="es">Español</option>
                 <option value="ru">Русский</option>
             </select>
-            <button id="translateBtn" class="btn-copy btn-secondary btn-small">翻译内容</button>
-            <button id="restoreBtn" class="btn-copy btn-secondary btn-small" style="display: none;">恢复原文</button>
+            <button id="translateBtn" class="btn-action btn-small">翻译</button>
+            <button id="restoreBtn" class="btn-action btn-small" style="display: none;">恢复原文</button>
         </div>
     </div>
     

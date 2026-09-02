@@ -21,6 +21,9 @@ export class SkillDetailPanel {
           case 'installSkill':
             vscode.commands.executeCommand('skillhub.installSkill', message.skillData);
             return;
+          case 'uninstallSkill':
+            vscode.commands.executeCommand('skillhub.uninstallSkill', message.skillData);
+            return;
           case 'copyPath':
             vscode.env.clipboard.writeText(message.path);
             vscode.window.setStatusBarMessage('已复制技能路径', 3000);
@@ -113,6 +116,26 @@ export class SkillDetailPanel {
   }
 
   private _getHtmlForWebview() {
+
+    let isInstalled = false;
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (workspaceFolders && workspaceFolders.length > 0) {
+        const workspacePath = workspaceFolders[0].uri.fsPath;
+        const agentsSkillsDir = path.join(workspacePath, '.agents', 'skills');
+        const sourcePath = this.skill.local_path;
+        if (sourcePath && fs.existsSync(sourcePath)) {
+            let targetName = path.basename(sourcePath);
+            const isDir = fs.statSync(sourcePath).isDirectory();
+            if (!isDir || targetName === 'SKILL.md') {
+                targetName = this.skill.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+            }
+            const targetPath = path.join(agentsSkillsDir, targetName);
+            if (fs.existsSync(targetPath)) {
+                isInstalled = true;
+            }
+        }
+    }
+
     let fileType = 'Unknown';
     let fileContent = '';
 
@@ -349,6 +372,89 @@ export class SkillDetailPanel {
             padding: 4px 12px;
             font-size: 12px;
         }
+        
+        /* TOC Styles */
+        .toc-container {
+            position: fixed;
+            right: 12px;
+            top: 30%;
+            transform: translateY(-50%);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+        }
+        .toc-lines {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 12px;
+            padding: 12px 8px;
+            background: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-editorWidget-border);
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+        .toc-line {
+            height: 2px;
+            background: var(--vscode-scrollbarSlider-background);
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        .toc-line.active {
+            background: var(--vscode-foreground);
+        }
+        .toc-container:hover .toc-lines {
+            display: none;
+        }
+        .toc-hover-menu {
+            display: none;
+            flex-direction: column;
+            background: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-editorWidget-border);
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+            max-height: 60vh;
+            overflow-y: auto;
+            width: 250px;
+        }
+        .toc-container:hover .toc-hover-menu {
+            display: flex;
+        }
+        .toc-header {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--vscode-descriptionForeground);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+            padding: 0 4px;
+        }
+        .toc-item {
+            background: transparent;
+            border: none;
+            color: var(--vscode-foreground);
+            text-align: left;
+            padding: 6px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+        .toc-item:hover {
+            background: var(--vscode-list-hoverBackground);
+        }
+        .toc-item.active {
+            color: var(--vscode-foreground);
+            background: var(--vscode-toolbar-hoverBackground);
+            font-weight: 500;
+        }
     </style>
 </head>
 <body>
@@ -362,8 +468,8 @@ export class SkillDetailPanel {
         
         <div class="action-bar">
             ${!isOnline ? `
-            <button id="installBtn" class="btn-action">
-                安装到当前工作区
+            <button id="installBtn" class="btn-action" data-installed="${isInstalled}">
+                ${isInstalled ? '从当前工作区移除' : '安装到当前工作区'}
             </button>
             ` : ''}
             <button id="copyPathBtn" class="btn-action btn-secondary">
@@ -382,7 +488,7 @@ export class SkillDetailPanel {
     
     <div class="translation-toolbar">
         <div class="translation-controls">
-            <span class="toolbar-label">Language:</span>
+            <span class="toolbar-label" style="font-size: 14px;" title="目标语言">🌐</span>
             <select id="targetLangSelect" class="lang-select">
                 <option value="zh-CN" selected>中文</option>
                 <option value="en">English</option>
@@ -392,14 +498,16 @@ export class SkillDetailPanel {
                 <option value="es">Español</option>
                 <option value="ru">Русский</option>
             </select>
-            <button id="translateBtn" class="btn-action btn-secondary btn-small">翻译</button>
-            <button id="restoreBtn" class="btn-action btn-secondary btn-small" style="display: none;">恢复原文</button>
+            <button id="translateBtn" class="btn-action btn-small">翻译</button>
+            <button id="restoreBtn" class="btn-action btn-small" style="display: none;">恢复原文</button>
         </div>
     </div>
     
     <div class="markdown-body">
         ${renderedMarkdown}
     </div>
+    
+    <div class="toc-container" id="tocContainer" style="display: none;"></div>
 
     <script>
         const vscode = acquireVsCodeApi();
@@ -409,14 +517,109 @@ export class SkillDetailPanel {
         let translations = {}; // cache translations by lang
         let currentMode = 'original';
 
+        // TOC 生成与滚动联动
+        function generateTOC() {
+            const markdownBody = document.querySelector('.markdown-body');
+            const headings = Array.from(markdownBody.querySelectorAll('h1, h2, h3, h4, h5, h6'));
+            const tocContainer = document.getElementById('tocContainer');
+            
+            if (headings.length === 0) {
+                tocContainer.style.display = 'none';
+                return;
+            }
+            tocContainer.style.display = 'flex';
+            
+            let tocHTML = '<div class="toc-lines">';
+            let hoverMenuHTML = '<div class="toc-hover-menu"><div class="toc-header">大纲导航</div>';
+            
+            headings.forEach((h, i) => {
+                if (!h.id) {
+                    let baseId = encodeURIComponent(h.innerText.trim().toLowerCase().replace(/\\s+/g, '-'));
+                    if (!baseId) baseId = 'heading';
+                    let id = baseId;
+                    let count = 1;
+                    while (document.getElementById(id)) {
+                        id = baseId + '-' + count;
+                        count++;
+                    }
+                    h.id = id;
+                }
+                
+                const level = parseInt(h.tagName.substring(1));
+                const lineWidth = level === 1 ? 20 : level === 2 ? 16 : level === 3 ? 12 : 8;
+                const paddingLeft = (level - 1) * 12 + 8;
+                
+                tocHTML += \`<div class="toc-line level-\${level}" data-id="\${h.id}" style="width: \${lineWidth}px;"></div>\`;
+                hoverMenuHTML += \`<button class="toc-item" data-id="\${h.id}" style="padding-left: \${paddingLeft}px">\${h.innerText}</button>\`;
+            });
+            
+            tocHTML += '</div>';
+            hoverMenuHTML += '</div>';
+            tocContainer.innerHTML = tocHTML + hoverMenuHTML;
+            
+            // Add click events
+            tocContainer.querySelectorAll('.toc-item').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const el = document.getElementById(btn.getAttribute('data-id'));
+                    if (el) {
+                        const y = el.getBoundingClientRect().top + window.pageYOffset - 20;
+                        window.scrollTo({top: y, behavior: 'smooth'});
+                    }
+                });
+            });
+            
+            updateActiveHeading();
+        }
+        
+        function updateActiveHeading() {
+            const headings = Array.from(document.querySelectorAll('.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6'));
+            if (headings.length === 0) return;
+            
+            let activeId = headings[0].id;
+            const threshold = 80;
+            
+            for (const h of headings) {
+                if (h.getBoundingClientRect().top <= threshold) {
+                    activeId = h.id;
+                } else {
+                    break;
+                }
+            }
+            
+            document.querySelectorAll('.toc-line, .toc-item').forEach(el => {
+                if (el.getAttribute('data-id') === activeId) {
+                    el.classList.add('active');
+                } else {
+                    el.classList.remove('active');
+                }
+            });
+        }
+        
+        window.addEventListener('scroll', updateActiveHeading);
+        
+        // 初始化 TOC
+        generateTOC();
+
         ${!isOnline ? `
         const installBtn = document.getElementById('installBtn');
         if (installBtn) {
             installBtn.addEventListener('click', () => {
-                vscode.postMessage({
-                    command: 'installSkill',
-                    skillData: ${JSON.stringify(this.skill)}
-                });
+                const isInstalled = installBtn.getAttribute('data-installed') === 'true';
+                if (isInstalled) {
+                    vscode.postMessage({
+                        command: 'uninstallSkill',
+                        skillData: ${JSON.stringify(this.skill)}
+                    });
+                    installBtn.textContent = '安装到当前工作区';
+                    installBtn.setAttribute('data-installed', 'false');
+                } else {
+                    vscode.postMessage({
+                        command: 'installSkill',
+                        skillData: ${JSON.stringify(this.skill)}
+                    });
+                    installBtn.textContent = '从当前工作区移除';
+                    installBtn.setAttribute('data-installed', 'true');
+                }
             });
         }
         ` : ''}
@@ -442,6 +645,7 @@ export class SkillDetailPanel {
                 document.getElementById('translateBtn').style.display = 'none';
                 document.getElementById('restoreBtn').style.display = 'inline-flex';
                 currentMode = 'translated';
+                generateTOC();
                 return;
             }
             
@@ -463,6 +667,7 @@ export class SkillDetailPanel {
             tBtn.innerText = '翻译';
             tBtn.disabled = false;
             currentMode = 'original';
+            generateTOC();
         });
 
         // If user changes language while translated, reset the button state
@@ -471,6 +676,7 @@ export class SkillDetailPanel {
                 const lang = document.getElementById('targetLangSelect').value;
                 if (translations[lang]) {
                     document.querySelector('.markdown-body').innerHTML = translations[lang];
+                    generateTOC();
                 } else {
                     document.querySelector('.markdown-body').innerHTML = originalHtml;
                     document.getElementById('restoreBtn').style.display = 'none';
@@ -479,6 +685,7 @@ export class SkillDetailPanel {
                     tBtn.innerText = '翻译';
                     tBtn.disabled = false;
                     currentMode = 'original';
+                    generateTOC();
                 }
             }
         });
@@ -495,6 +702,7 @@ export class SkillDetailPanel {
                 document.getElementById('translateBtn').style.display = 'none';
                 document.getElementById('restoreBtn').style.display = 'inline-flex';
                 currentMode = 'translated';
+                generateTOC();
             }
         });
     </script>
