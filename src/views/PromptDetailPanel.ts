@@ -130,7 +130,12 @@ export class PromptDetailPanel {
 
     const renderedMarkdown = content ? md.render(content) : '<p>No content available.</p>';
     
-
+    const safeJsonStringify = (data: any) => {
+        return JSON.stringify(data)
+            .replace(/</g, '\\u003c')
+            .replace(/>/g, '\\u003e')
+            .replace(/&/g, '\\u0026');
+    };
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -152,12 +157,12 @@ export class PromptDetailPanel {
         .page-container {
             width: 100%;
             margin: 0;
-            padding: 24px 100px 60px 100px;
+            padding: 24px 100px 180px 100px;
             box-sizing: border-box;
         }
         @media (max-width: 640px) {
             .page-container {
-                padding: 20px 24px 40px;
+                padding: 20px 24px 120px;
             }
         }
         h1, h2, h3, h4, h5, h6 { 
@@ -317,7 +322,7 @@ export class PromptDetailPanel {
         .toc-container {
             position: fixed;
             right: 20px;
-            top: 70px;
+            top: 130px;
             bottom: 30px;
             z-index: 1000;
             display: flex;
@@ -331,23 +336,34 @@ export class PromptDetailPanel {
             display: flex;
             flex-direction: column;
             align-items: flex-end;
-            gap: 6px;
+            gap: 10px;
             padding: 8px 4px;
             background: transparent;
             border: none;
             box-shadow: none;
             cursor: pointer;
+            max-height: 100%;
+            overflow-y: auto;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+        .toc-lines::-webkit-scrollbar {
+            display: none;
         }
         .toc-line {
             height: 2px;
-            background: var(--vscode-editor-foreground, #666666);
-            opacity: 0.35;
+            background: var(--vscode-editor-foreground, #888888);
+            opacity: 0.4;
             border-radius: 9999px;
-            transition: opacity 0.2s ease, background-color 0.2s ease;
+            transition: all 0.2s ease;
         }
         .toc-line.active {
-            opacity: 0.95;
-            background: var(--vscode-focusBorder, var(--vscode-editor-foreground, #333333));
+            opacity: 1;
+            background: var(--vscode-focusBorder, #007acc);
+            box-shadow: none;
+            height: 2.5px;
+            transform: scaleX(1.15);
+            transform-origin: right;
         }
         .toc-container:hover .toc-lines {
             display: none;
@@ -468,14 +484,16 @@ export class PromptDetailPanel {
 
     <script>
         const vscode = acquireVsCodeApi();
-        const rawContent = ${JSON.stringify(content)};
-        const originalHtml = ${JSON.stringify(renderedMarkdown)};
+        const rawContent = ${safeJsonStringify(content)};
+        const originalHtml = ${safeJsonStringify(content ? md.render(content) : '<p>No content available.</p>')};
         let translations = {};
         let currentMode = 'original';
+        let isClickScrolling = false;
 
         // TOC 生成与滚动联动
         function generateTOC() {
             const markdownBody = document.querySelector('.markdown-body');
+            if (!markdownBody) return;
             const headings = Array.from(markdownBody.querySelectorAll('h1, h2, h3, h4, h5, h6'));
             const tocContainer = document.getElementById('tocContainer');
             
@@ -486,8 +504,9 @@ export class PromptDetailPanel {
             }
             tocContainer.style.display = 'flex';
             
-            let tocHTML = '<div class="toc-lines">';
-            let hoverMenuHTML = '<div class="toc-hover-menu"><div class="toc-header">大纲导航</div>';
+            const gap = headings.length > 60 ? 4 : (headings.length > 35 ? 6 : 10);
+            let tocHTML = '<div class="toc-lines" style="gap: ' + gap + 'px;">';
+            let hoverMenuHTML = '<div class="toc-hover-menu"><div class="toc-header" style="display:flex;justify-content:space-between;align-items:center;"><span>大纲导航</span><span style="font-size:10px;opacity:0.7;font-weight:normal;">' + headings.length + ' 节</span></div>';
             
             headings.forEach((h, i) => {
                 if (!h.id) {
@@ -505,43 +524,34 @@ export class PromptDetailPanel {
                 const level = parseInt(h.tagName.substring(1));
                 const lineWidth = level === 1 ? 20 : level === 2 ? 16 : level === 3 ? 12 : 10;
                 const paddingLeft = (level - 1) * 12 + 8;
+                const titleText = (h.innerText || '').trim().replace(/"/g, '&quot;');
                 
-                tocHTML += '<div class="toc-line level-' + level + '" data-id="' + h.id + '" style="width: ' + lineWidth + 'px;"></div>';
+                tocHTML += '<div class="toc-line level-' + level + '" data-id="' + h.id + '" title="' + titleText + '" style="width: ' + lineWidth + 'px;"></div>';
                 hoverMenuHTML += '<button class="toc-item" data-id="' + h.id + '" style="padding-left: ' + paddingLeft + 'px">' + h.innerText + '</button>';
             });
             
             tocHTML += '</div>';
             hoverMenuHTML += '</div>';
             tocContainer.innerHTML = tocHTML + hoverMenuHTML;
-            
+
             tocContainer.querySelectorAll('.toc-item').forEach(btn => {
                 btn.addEventListener('click', () => {
-                    const el = document.getElementById(btn.getAttribute('data-id'));
+                    const id = btn.getAttribute('data-id');
+                    const el = document.getElementById(id);
                     if (el) {
+                        isClickScrolling = true;
+                        setActiveHeading(id);
                         const y = el.getBoundingClientRect().top + window.pageYOffset - 20;
                         window.scrollTo({top: y, behavior: 'smooth'});
+                        setTimeout(() => { isClickScrolling = false; }, 650);
                     }
                 });
             });
             
             updateActiveHeading();
         }
-        
-        function updateActiveHeading() {
-            const headings = Array.from(document.querySelectorAll('.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6'));
-            if (headings.length === 0) return;
-            
-            let activeId = headings[0].id;
-            const threshold = 120;
-            
-            for (const h of headings) {
-                if (h.getBoundingClientRect().top <= threshold) {
-                    activeId = h.id;
-                } else {
-                    break;
-                }
-            }
-            
+
+        function setActiveHeading(activeId) {
             document.querySelectorAll('.toc-line, .toc-item').forEach(el => {
                 if (el.getAttribute('data-id') === activeId) {
                     el.classList.add('active');
@@ -551,10 +561,49 @@ export class PromptDetailPanel {
             });
         }
         
-        window.addEventListener('scroll', updateActiveHeading);
+        function updateActiveHeading() {
+            if (isClickScrolling) return;
+            const headings = Array.from(document.querySelectorAll('.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6'));
+            if (headings.length === 0) return;
+
+            // 1. 触底检测（页面滚动到底部时，逆序寻找视口内已出现的最后一个标题）
+            const scrollY = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
+            const windowH = window.innerHeight || document.documentElement.clientHeight;
+            const docH = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+            const scrollBottom = docH - scrollY - windowH;
+
+            if (scrollBottom < 45) {
+                for (let i = headings.length - 1; i >= 0; i--) {
+                    const rect = headings[i].getBoundingClientRect();
+                    if (rect.top < windowH - 30) {
+                        setActiveHeading(headings[i].id);
+                        return;
+                    }
+                }
+                setActiveHeading(headings[headings.length - 1].id);
+                return;
+            }
+            
+            let activeId = headings[0].id;
+            const threshold = 140;
+            
+            for (const h of headings) {
+                if (h.getBoundingClientRect().top <= threshold) {
+                    activeId = h.id;
+                } else {
+                    break;
+                }
+            }
+            
+            setActiveHeading(activeId);
+        }
+        
+        window.addEventListener('scroll', updateActiveHeading, { passive: true });
+        document.addEventListener('scroll', updateActiveHeading, { passive: true, capture: true });
         generateTOC();
         window.addEventListener('DOMContentLoaded', generateTOC);
-        setTimeout(generateTOC, 200);
+        setTimeout(generateTOC, 150);
+        setTimeout(generateTOC, 500);
         
         document.getElementById('copyBtn').addEventListener('click', () => {
             vscode.postMessage({
