@@ -204,10 +204,23 @@ export class SkillDetailPanel {
     <style>
         body { 
             font-family: var(--vscode-font-family); 
-            padding: 20px; 
+            margin: 0;
+            padding: 0; 
             color: var(--vscode-foreground); 
             background-color: var(--vscode-editor-background);
             line-height: 1.6;
+            overflow-x: hidden;
+        }
+        .page-container {
+            width: 100%;
+            margin: 0;
+            padding: 24px 100px 60px 100px;
+            box-sizing: border-box;
+        }
+        @media (max-width: 640px) {
+            .page-container {
+                padding: 20px 24px 40px;
+            }
         }
         h1, h2, h3, h4, h5, h6 { 
             margin-top: 1.5em; 
@@ -373,52 +386,65 @@ export class SkillDetailPanel {
             font-size: 12px;
         }
         
-        /* TOC Styles */
+        /* TOC Styles - 对标桌面版不带卡片背景的轻量细小横线及展开大纲 */
         .toc-container {
             position: fixed;
-            right: 12px;
-            top: 30%;
-            transform: translateY(-50%);
+            right: 20px;
+            top: 70px;
+            bottom: 30px;
             z-index: 1000;
             display: flex;
             flex-direction: column;
             align-items: flex-end;
+            justify-content: flex-start;
+            pointer-events: none;
         }
         .toc-lines {
+            pointer-events: auto;
             display: flex;
             flex-direction: column;
             align-items: flex-end;
-            gap: 12px;
-            padding: 12px 8px;
-            background: var(--vscode-editor-background);
-            border: 1px solid var(--vscode-editorWidget-border);
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            transition: all 0.3s ease;
+            gap: 6px;
+            padding: 8px 4px;
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            cursor: pointer;
         }
         .toc-line {
             height: 2px;
-            background: var(--vscode-scrollbarSlider-background);
-            border-radius: 4px;
-            transition: background 0.2s;
+            background: var(--vscode-editor-foreground, #666666);
+            opacity: 0.35;
+            border-radius: 9999px;
+            transition: opacity 0.2s ease, background-color 0.2s ease;
         }
         .toc-line.active {
-            background: var(--vscode-foreground);
+            opacity: 0.95;
+            background: var(--vscode-focusBorder, var(--vscode-editor-foreground, #333333));
         }
         .toc-container:hover .toc-lines {
             display: none;
         }
         .toc-hover-menu {
+            pointer-events: auto;
             display: none;
             flex-direction: column;
-            background: var(--vscode-editor-background);
+            background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
             border: 1px solid var(--vscode-editorWidget-border);
-            border-radius: 8px;
+            border-radius: 12px;
             padding: 12px;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.15);
-            max-height: 60vh;
+            box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+            backdrop-filter: blur(12px);
+            max-height: 100%;
             overflow-y: auto;
-            width: 250px;
+            overflow-x: hidden;
+            width: 288px;
+            box-sizing: border-box;
+            animation: tocFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes tocFadeIn {
+            from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
         }
         .toc-container:hover .toc-hover-menu {
             display: flex;
@@ -428,9 +454,9 @@ export class SkillDetailPanel {
             font-weight: 600;
             color: var(--vscode-descriptionForeground);
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 0.5px;
             margin-bottom: 8px;
-            padding: 0 4px;
+            padding: 0 6px;
         }
         .toc-item {
             background: transparent;
@@ -444,67 +470,82 @@ export class SkillDetailPanel {
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            transition: all 0.2s;
+            transition: all 0.15s ease;
             font-family: inherit;
+            width: 100%;
+            box-sizing: border-box;
         }
         .toc-item:hover {
-            background: var(--vscode-list-hoverBackground);
+            background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.1));
+            color: var(--vscode-foreground);
         }
         .toc-item.active {
-            color: var(--vscode-foreground);
-            background: var(--vscode-toolbar-hoverBackground);
-            font-weight: 500;
+            background: var(--vscode-list-activeSelectionBackground, rgba(128, 128, 128, 0.16));
+            color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+            font-weight: 600;
+        }
+        .toc-hover-menu::-webkit-scrollbar {
+            width: 4px;
+        }
+        .toc-hover-menu::-webkit-scrollbar-thumb {
+            background: rgba(128, 128, 128, 0.2);
+            border-radius: 4px;
+        }
+        .toc-hover-menu::-webkit-scrollbar-thumb:hover {
+            background: rgba(128, 128, 128, 0.4);
         }
     </style>
 </head>
 <body>
-    <div class="header-container">
-        <div class="title-row">
-            <h1>${escapeHtml(this.skill.name)}</h1>
-            <div class="header-badges">
-                ${this.skill.tags ? this.skill.tags.split(',').map(t => `<span class="badge badge-outline">#${escapeHtml(t.trim())}</span>`).join('') : ''}
+    <div class="page-container">
+        <div class="header-container">
+            <div class="title-row">
+                <h1>${escapeHtml(this.skill.name)}</h1>
+                <div class="header-badges">
+                    ${this.skill.tags ? this.skill.tags.split(',').map(t => `<span class="badge badge-outline">#${escapeHtml(t.trim())}</span>`).join('') : ''}
+                </div>
+            </div>
+            
+            <div class="action-bar">
+                ${!isOnline ? `
+                <button id="installBtn" class="btn-action" data-installed="${isInstalled}">
+                    ${isInstalled ? '从当前工作区移除' : '安装到当前工作区'}
+                </button>
+                ` : ''}
+                <button id="copyPathBtn" class="btn-action btn-secondary">
+                    复制技能路径
+                </button>
+                <button id="copyContentBtn" class="btn-action btn-secondary">
+                    复制 SKILL.md 内容
+                </button>
             </div>
         </div>
         
-        <div class="action-bar">
-            ${!isOnline ? `
-            <button id="installBtn" class="btn-action" data-installed="${isInstalled}">
-                ${isInstalled ? '从当前工作区移除' : '安装到当前工作区'}
-            </button>
-            ` : ''}
-            <button id="copyPathBtn" class="btn-action btn-secondary">
-                复制技能路径
-            </button>
-            <button id="copyContentBtn" class="btn-action btn-secondary">
-                复制 SKILL.md 内容
-            </button>
+        <div class="path-info">
+            <span>Path:</span>
+            <span class="path-value">${escapeHtml(this.skill.local_path)}</span>
         </div>
-    </div>
-    
-    <div class="path-info">
-        <span>Path:</span>
-        <span class="path-value">${escapeHtml(this.skill.local_path)}</span>
-    </div>
-    
-    <div class="translation-toolbar">
-        <div class="translation-controls">
-            <span class="toolbar-label" style="font-size: 14px;" title="目标语言">🌐</span>
-            <select id="targetLangSelect" class="lang-select">
-                <option value="zh-CN" selected>中文</option>
-                <option value="en">English</option>
-                <option value="ja">日本語</option>
-                <option value="ko">한국어</option>
-                <option value="fr">Français</option>
-                <option value="es">Español</option>
-                <option value="ru">Русский</option>
-            </select>
-            <button id="translateBtn" class="btn-action btn-small">翻译</button>
-            <button id="restoreBtn" class="btn-action btn-small" style="display: none;">恢复原文</button>
+        
+        <div class="translation-toolbar">
+            <div class="translation-controls">
+                <span class="toolbar-label" style="font-size: 14px;" title="目标语言">🌐</span>
+                <select id="targetLangSelect" class="lang-select">
+                    <option value="zh-CN" selected>中文</option>
+                    <option value="en">English</option>
+                    <option value="ja">日本語</option>
+                    <option value="ko">한국어</option>
+                    <option value="fr">Français</option>
+                    <option value="es">Español</option>
+                    <option value="ru">Русский</option>
+                </select>
+                <button id="translateBtn" class="btn-action btn-small">翻译</button>
+                <button id="restoreBtn" class="btn-action btn-small" style="display: none;">恢复原文</button>
+            </div>
         </div>
-    </div>
-    
-    <div class="markdown-body">
-        ${renderedMarkdown}
+        
+        <div class="markdown-body">
+            ${renderedMarkdown}
+        </div>
     </div>
     
     <div class="toc-container" id="tocContainer" style="display: none;"></div>
@@ -534,7 +575,7 @@ export class SkillDetailPanel {
             
             headings.forEach((h, i) => {
                 if (!h.id) {
-                    let baseId = encodeURIComponent(h.innerText.trim().toLowerCase().replace(/\\s+/g, '-'));
+                    let baseId = encodeURIComponent(h.innerText.trim().toLowerCase().replace(/\s+/g, '-'));
                     if (!baseId) baseId = 'heading';
                     let id = baseId;
                     let count = 1;
@@ -546,11 +587,11 @@ export class SkillDetailPanel {
                 }
                 
                 const level = parseInt(h.tagName.substring(1));
-                const lineWidth = level === 1 ? 20 : level === 2 ? 16 : level === 3 ? 12 : 8;
+                const lineWidth = level === 1 ? 20 : level === 2 ? 16 : level === 3 ? 12 : 10;
                 const paddingLeft = (level - 1) * 12 + 8;
                 
-                tocHTML += \`<div class="toc-line level-\${level}" data-id="\${h.id}" style="width: \${lineWidth}px;"></div>\`;
-                hoverMenuHTML += \`<button class="toc-item" data-id="\${h.id}" style="padding-left: \${paddingLeft}px">\${h.innerText}</button>\`;
+                tocHTML += '<div class="toc-line level-' + level + '" data-id="' + h.id + '" style="width: ' + lineWidth + 'px;"></div>';
+                hoverMenuHTML += '<button class="toc-item" data-id="' + h.id + '" style="padding-left: ' + paddingLeft + 'px">' + h.innerText + '</button>';
             });
             
             tocHTML += '</div>';
@@ -576,7 +617,7 @@ export class SkillDetailPanel {
             if (headings.length === 0) return;
             
             let activeId = headings[0].id;
-            const threshold = 80;
+            const threshold = 120;
             
             for (const h of headings) {
                 if (h.getBoundingClientRect().top <= threshold) {
@@ -597,8 +638,10 @@ export class SkillDetailPanel {
         
         window.addEventListener('scroll', updateActiveHeading);
         
-        // 初始化 TOC
+        // 初始化 TOC 及延迟重试保障
         generateTOC();
+        window.addEventListener('DOMContentLoaded', generateTOC);
+        setTimeout(generateTOC, 200);
 
         ${!isOnline ? `
         const installBtn = document.getElementById('installBtn');
