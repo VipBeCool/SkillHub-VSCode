@@ -21,57 +21,74 @@ function unescapeHtml(text: string): string {
 export async function translateText(text: string, targetLang: string = 'zh-CN'): Promise<string> {
     if (!text) return text;
 
-    const maxLen = 1000;
-    const chunks: string[] = [];
-    let currentChunk = '';
-
-    // Split text into chunks to respect API length limits
-    const lines = text.split('\n');
-    for (const line of lines) {
-        if (currentChunk.length + line.length + 1 > maxLen) {
-            if (currentChunk.length > 0) {
-                chunks.push(currentChunk);
-                currentChunk = '';
-            }
-            if (line.length > maxLen) {
-                let remaining = line;
-                while (remaining.length > 0) {
-                    chunks.push(remaining.substring(0, maxLen));
-                    remaining = remaining.substring(maxLen);
-                }
-                continue;
-            }
-        }
-        if (currentChunk.length > 0) {
-            currentChunk += '\n';
-        }
-        currentChunk += line;
+    // 保护 Markdown 骨架：空行、代码块、分隔符原样保留；
+    // 标题、列表行、正文行单独翻译，绝不合并，彻底杜绝换行符被翻译引擎吞噬粘连
+    interface MarkdownItem {
+        type: 'preserved' | 'translate';
+        content: string;
     }
-    if (currentChunk.length > 0) {
-        chunks.push(currentChunk);
+
+    const items: MarkdownItem[] = [];
+    let inCodeBlock = false;
+
+    for (const line of text.split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('```')) {
+            inCodeBlock = !inCodeBlock;
+            items.push({ type: 'preserved', content: line });
+            continue;
+        }
+        if (inCodeBlock || !trimmed || trimmed === '---') {
+            items.push({ type: 'preserved', content: line });
+            continue;
+        }
+
+        // 字符数 <= 350 直接独立处理，防止合并吞噬换行
+        if (line.length <= 350) {
+            items.push({ type: 'translate', content: line });
+        } else {
+            // 超长单行按标点符号切分
+            let sub = '';
+            for (const ch of line) {
+                sub += ch;
+                if (sub.length >= 300 && ['。', '.', '；', ';', ' ', '!'].includes(ch)) {
+                    items.push({ type: 'translate', content: sub });
+                    sub = '';
+                }
+            }
+            if (sub) {
+                items.push({ type: 'translate', content: sub });
+            }
+        }
     }
 
     const now = Date.now();
-    // 若 10 分钟内 Google 判定不可用，直接跳过以避免每次等待 2.5 秒
-    const isGoogleCooledDown = (now - googleFailedAt) > 10 * 60 * 1000;
+    let allowGoogle = (now - googleFailedAt) > 10 * 60 * 1000;
 
     let fullTranslatedText = '';
 
-    for (const chunk of chunks) {
+    for (const item of items) {
+        if (item.type === 'preserved') {
+            fullTranslatedText += item.content + '\n';
+            continue;
+        }
+
+        const chunk = item.content;
         let translatedChunk: string | null = null;
 
-        // 1. 尝试 Google 翻译（2.5 秒超时）
-        if (isGoogleCooledDown) {
+        // 1. 尝试 Google 翻译（1.5 秒极速判定）
+        if (allowGoogle) {
             try {
                 translatedChunk = await translateChunkGoogle(chunk, targetLang);
-                googleFailedAt = 0; // 成功则重置失败标记
+                googleFailedAt = 0;
             } catch (err) {
-                console.warn('[Translate] Google translate unavailable, fallback to MyMemory:', err);
+                console.warn('[Translate] Google unavailable, switching to Tencent/MyMemory:', err);
+                allowGoogle = false;
                 googleFailedAt = Date.now();
             }
         }
 
-        // 2. 若 Google 失败或处于熔断期，优先走国内直连主力源 (腾讯交互翻译 Tencent Transmart)
+        // 2. 若 Google 失败或处于熔断期，走国内主力源 (腾讯交互翻译 Tencent Transmart)
         if (!translatedChunk) {
             try {
                 translatedChunk = await translateChunkTencent(chunk, targetLang);
@@ -86,11 +103,11 @@ export async function translateText(text: string, targetLang: string = 'zh-CN'):
                 translatedChunk = await translateChunkMyMemory(chunk, targetLang);
             } catch (err) {
                 console.error('[Translate] MyMemory fallback provider also failed:', err);
-                translatedChunk = chunk; // 兜底保留原文，防止丢失内容
+                translatedChunk = chunk; // 兜底保留原文
             }
         }
 
-        fullTranslatedText += translatedChunk + '\n';
+        fullTranslatedText += (translatedChunk || chunk) + '\n';
     }
 
     return fullTranslatedText.trimEnd();
@@ -103,7 +120,7 @@ function translateChunkGoogle(text: string, targetLang: string): Promise<string>
 
         const options: https.RequestOptions = {
             method: 'POST',
-            timeout: 2500,
+            timeout: 1500,
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -157,7 +174,7 @@ function translateChunkMyMemory(text: string, targetLang: string): Promise<strin
 
         const options: https.RequestOptions = {
             method: 'POST',
-            timeout: 6000,
+            timeout: 2500,
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -176,7 +193,7 @@ function translateChunkMyMemory(text: string, targetLang: string): Promise<strin
                 try {
                     const json = JSON.parse(data);
                     const translated = json?.responseData?.translatedText;
-                    if (translated && !translated.startsWith('MYMEMORY WARNING:')) {
+                    if (translated && !translated.startsWith('MYMEMORY WARNING:') && !translated.includes('QUERY LENGTH LIMIT')) {
                         resolve(unescapeHtml(translated));
                     } else {
                         reject(new Error('Invalid MyMemory response'));
@@ -218,7 +235,7 @@ function translateChunkTencent(text: string, targetLang: string): Promise<string
 
         const options: https.RequestOptions = {
             method: 'POST',
-            timeout: 3500,
+            timeout: 2000,
             headers: {
                 'Content-Type': 'application/json',
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
